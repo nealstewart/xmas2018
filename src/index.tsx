@@ -8,6 +8,7 @@ interface Particle {
   velocity: Vector2d;
   radius: number;
   timeSinceDeath: number;
+  neighbors: number;
 }
 
 interface State {
@@ -41,40 +42,56 @@ const gravity = 1 / 3000;
 const maxSpeed = 0.1;
 
 const isAtBottom = ({location, radius}: Particle, height: number) =>
-location[1] + radius >= height
+  location[1] + radius >= height;
+
+const updateLivingParticle = (particle: Particle, timeDiff: number) => {
+  const [x, y] = particle.location;
+  const [xVelocity, yVelocity] = particle.velocity;
+  particle.velocity = [xVelocity * 0.98, Math.min(yVelocity + gravity * timeDiff, maxSpeed)]
+  particle.location = [
+    x + xVelocity * timeDiff,
+    y + yVelocity * timeDiff,
+  ];
+};
+
+const updateDeadParticle = (particle: Particle, height: number, timeDiff: number) => {
+  if (!isAtBottom(particle, height)) {
+    particle.location[1] = Math.min(height, particle.location[1] + 0.2); 
+  }
+
+  particle.timeSinceDeath += timeDiff;
+  particle.radius = particle.radius * (1 - 0.008 / (particle.neighbors * 2));
+};
+
+const findTheDead = (particles: Particle[], deadSnow: Particle[], height: number) => {
+  const recentlyDead = deadSnow.filter(({timeSinceDeath}) => timeSinceDeath <= 400);
+
+  const atBottom = particles.filter(p => isAtBottom(p, height))
+
+  const collided = particles.map(p => ({
+    overlapping: recentlyDead.filter(s => overlap(p, s)),
+    particle: p,
+  })).filter(({overlapping}) => overlapping.length > 0);
+  
+  return {
+    atBottom,
+    collided
+  };
+}
 
 const update = (canvas: HTMLCanvasElement, state:State, timeDiff: number) => {
-  state.particles.forEach(p => {
-    const [x, y] = p.location;
-    const [xVelocity, yVelocity] = p.velocity;
-    p.velocity = [xVelocity * 0.98, Math.min(yVelocity + gravity * timeDiff, maxSpeed)]
-    p.location = [
-      x + xVelocity * timeDiff,
-      y + yVelocity * timeDiff,
-    ];
-  });
+  state.particles.forEach(p => updateLivingParticle(p, timeDiff));
+  state.deadSnow.forEach(p => updateDeadParticle(p, canvas.height, timeDiff));
+  state.deadSnow = state.deadSnow.filter(({radius}) => radius > 1);
 
-  const recentlyDead = state.deadSnow.filter(({timeSinceDeath}) => timeSinceDeath < 10);
-  const shouldStop = (p: Particle) => isAtBottom(p, canvas.height) || recentlyDead.some(s => overlap(p, s));
-  
-  state.deadSnow.forEach(d => d.timeSinceDeath += 1);
+  const {atBottom, collided} = findTheDead(state.particles, state.deadSnow, canvas.height);
 
-  state.deadSnow = [
-    ...state.deadSnow, 
-    ...state.particles.filter(shouldStop)
-  ];
-
-  state.deadSnow.forEach((p) => {
-    if (!isAtBottom(p, canvas.height)) {
-      p.location[1] = Math.min(canvas.height, p.location[1] + 0.2); 
-    }
-  });
-
-  state.deadSnow = state.deadSnow.filter(({radius}) => radius > 0.5);
-  state.particles = difference(state.particles, state.deadSnow);
-
-  state.particles = state.particles.filter(p =>
-    p.location[0] >= 0 && p.location[0] < canvas.width);
+  // Let the overlapping know they have neighbours.
+  collided.forEach(p => p.overlapping.forEach(o => o.neighbors += 1));
+  const particlesDeadByCollision = collided.map(p => p.particle);
+  const newlyDead = [...particlesDeadByCollision, ...atBottom];
+  state.deadSnow = [...state.deadSnow, ...newlyDead];
+  state.particles = difference(state.particles, newlyDead);
 }
 
 function createParticles(touchPoint: Vector2d) {
@@ -82,6 +99,7 @@ function createParticles(touchPoint: Vector2d) {
 
   return range(0, pointsToAdd).map<Particle>(() => ({
     timeSinceDeath: 0,
+    neighbors: 1,
     radius: Math.random() * 1.5 + 2,
     location: [
       touchPoint[0] + getJitterAmount() * getDirection(),
@@ -115,7 +133,7 @@ const overlap = (a: Particle, b: Particle) =>
   document.addEventListener('click', () => {
     document.documentElement.requestFullscreen();
   });
-  
+
   const touchHandler = (evt: TouchEvent) => {
 
     const touchArray = Array.from(evt.touches).map<Vector2d>(touch => [touch.clientX, touch.clientY]);
