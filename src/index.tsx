@@ -112,7 +112,12 @@ const overlap = (a: Particle, b: Particle) =>
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
+  document.addEventListener('click', () => {
+    document.documentElement.requestFullscreen();
+  });
+  
   const touchHandler = (evt: TouchEvent) => {
+
     const touchArray = Array.from(evt.touches).map<Vector2d>(touch => [touch.clientX, touch.clientY]);
 
     const allNewParticles = 
