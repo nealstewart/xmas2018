@@ -4,7 +4,9 @@
   "private": true,
   "dependencies": {
     "@types/lodash.range": "^3.2.4",
+    "@types/lodash.without": "^4.4.4",
     "lodash.range": "^3.2.0",
+    "lodash.without": "^4.4.0",
     "react": "^16.7.0",
     "react-dom": "^16.7.0",
     "react-scripts-ts": "3.1.0"
