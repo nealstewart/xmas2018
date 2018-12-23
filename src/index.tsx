@@ -7,6 +7,7 @@ interface Particle {
   location: Vector2d;
   velocity: Vector2d;
   radius: number;
+  timeSinceDeath: number;
 }
 
 interface State {
@@ -40,7 +41,7 @@ const gravity = 1 / 3000;
 const maxSpeed = 0.1;
 
 const isAtBottom = ({location, radius}: Particle, height: number) =>
-location[1] + radius + 10 >= height
+location[1] + radius >= height
 
 const update = (canvas: HTMLCanvasElement, state:State, timeDiff: number) => {
   state.particles.forEach(p => {
@@ -53,7 +54,10 @@ const update = (canvas: HTMLCanvasElement, state:State, timeDiff: number) => {
     ];
   });
 
-  const shouldStop = (p: Particle) => isAtBottom(p, canvas.height) || state.deadSnow.some(s => overlap(p, s));
+  const recentlyDead = state.deadSnow.filter(({timeSinceDeath}) => timeSinceDeath < 10);
+  const shouldStop = (p: Particle) => isAtBottom(p, canvas.height) || recentlyDead.some(s => overlap(p, s));
+  
+  state.deadSnow.forEach(d => d.timeSinceDeath += 1);
 
   state.deadSnow = [
     ...state.deadSnow, 
@@ -77,6 +81,7 @@ function createParticles(touchPoint: Vector2d) {
   const pointsToAdd = Math.ceil(Math.random() * 5);
 
   return range(0, pointsToAdd).map<Particle>(() => ({
+    timeSinceDeath: 0,
     radius: Math.random() * 1.5 + 2,
     location: [
       touchPoint[0] + getJitterAmount() * getDirection(),
