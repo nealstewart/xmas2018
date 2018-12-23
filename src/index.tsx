@@ -26,7 +26,9 @@ const render = (canvas: HTMLCanvasElement, state: State) => {
 
   state.particles.forEach(({location: [x, y], size}) => {
     context.fillStyle = "white";
-    context.fillRect(x, y, size, size);
+    context.beginPath();
+    context.arc(x, y, size, 0, Math.PI * 2, true); 
+    context.fill();
   });
 }
 
@@ -58,7 +60,7 @@ function createParticles(touchPoint: Vector2d) {
   const pointsToAdd = Math.ceil(Math.random() * 5);
 
   return range(0, pointsToAdd).map<Particle>(() => ({
-    size: Math.ceil(Math.random() * 3) + 2,
+    size: Math.random() * 1.5 + 2,
     location: [
       touchPoint[0] + getJitterAmount() * getDirection(),
       touchPoint[1] + getJitterAmount() * getDirection()
