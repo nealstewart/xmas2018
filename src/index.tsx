@@ -10,13 +10,12 @@ interface Particle {
   timeSinceDeath: number;
   neighbors: number;
 }
-
 interface State {
   deadSnow: Particle[];
   particles: Particle[];
 }
 
-const getDirection = () => Math.random() * 2 - 1 >= 0 ? 1 : -1;
+const getRandomDirection = () => Math.random() >= 0.5 ? 1 : -1;
 
 const JITTER_PIXELS = 1;
 const getJitterAmount = () => Math.random() * JITTER_PIXELS;
@@ -38,21 +37,25 @@ const render = (canvas: HTMLCanvasElement, state: State) => {
 }
 
 const gravity = 1 / 3000;
-
 const maxSpeed = 0.1;
-
 const isAtBottom = ({location, radius}: Particle, height: number) =>
   location[1] + radius >= height;
+
+const removeHorizontalDrag = (velocity: number) => velocity * 0.98;
 
 const updateLivingParticle = (particle: Particle, timeDiff: number) => {
   const [x, y] = particle.location;
   const [xVelocity, yVelocity] = particle.velocity;
-  particle.velocity = [xVelocity * 0.98, Math.min(yVelocity + gravity * timeDiff, maxSpeed)]
+  particle.velocity = [removeHorizontalDrag(xVelocity), Math.min(yVelocity + gravity * timeDiff, maxSpeed)]
   particle.location = [
     x + xVelocity * timeDiff,
     y + yVelocity * timeDiff,
   ];
 };
+
+const calcMeltingRate = (particle: Particle) =>
+  // The more neighbors a particle has, the slower it should melt.
+  0.008 / (particle.neighbors * 2);
 
 const updateDeadParticle = (particle: Particle, height: number, timeDiff: number) => {
   if (!isAtBottom(particle, height)) {
@@ -60,12 +63,12 @@ const updateDeadParticle = (particle: Particle, height: number, timeDiff: number
   }
 
   particle.timeSinceDeath += timeDiff;
-  particle.radius = particle.radius * (1 - 0.008 / (particle.neighbors * 2));
+  particle.radius = particle.radius * (1 - calcMeltingRate(particle));
 };
 
-const findTheDead = (particles: Particle[], deadSnow: Particle[], height: number) => {
-  const recentlyDead = deadSnow.filter(({timeSinceDeath}) => timeSinceDeath <= 400);
-
+const interactiveDeadTime = 500;
+const findTheNewDead = (particles: Particle[], deadSnow: Particle[], height: number) => {
+  const recentlyDead = deadSnow.filter(({timeSinceDeath}) => timeSinceDeath <= interactiveDeadTime);
   const atBottom = particles.filter(p => isAtBottom(p, height))
 
   const collided = particles.map(p => ({
@@ -73,40 +76,42 @@ const findTheDead = (particles: Particle[], deadSnow: Particle[], height: number
     particle: p,
   })).filter(({overlapping}) => overlapping.length > 0);
   
-  return {
-    atBottom,
-    collided
-  };
+  return { atBottom, collided };
 }
+
+const maxParticles = 2000;
+
+const hasMelted = ({radius}: Particle) => radius <= 1;
+const incrementNeighbors = (p: Particle) => p.neighbors += 1;
 
 const update = (canvas: HTMLCanvasElement, state:State, timeDiff: number) => {
   state.particles.forEach(p => updateLivingParticle(p, timeDiff));
   state.deadSnow.forEach(p => updateDeadParticle(p, canvas.height, timeDiff));
-  state.deadSnow = state.deadSnow.filter(({radius}) => radius > 1);
 
-  const {atBottom, collided} = findTheDead(state.particles, state.deadSnow, canvas.height);
+  state.deadSnow = state.deadSnow.filter(p => !hasMelted(p));
+  const {atBottom, collided} = findTheNewDead(state.particles, state.deadSnow, canvas.height);
+  collided.forEach(p => p.overlapping.forEach(incrementNeighbors));
 
-  // Let the overlapping know they have neighbours.
-  collided.forEach(p => p.overlapping.forEach(o => o.neighbors += 1));
   const particlesDeadByCollision = collided.map(p => p.particle);
   const newlyDead = [...particlesDeadByCollision, ...atBottom];
-  state.deadSnow = [...state.deadSnow, ...newlyDead];
+  state.deadSnow = [...newlyDead, ...state.deadSnow].slice(0, maxParticles);
+
   state.particles = difference(state.particles, newlyDead);
 }
 
-function createParticles(touchPoint: Vector2d) {
-  const pointsToAdd = Math.ceil(Math.random() * 5);
+function createParticles(touchPoint: Vector2d, max = 5) {
+  const pointsToAdd = Math.ceil(Math.random() * max);
 
   return range(0, pointsToAdd).map<Particle>(() => ({
     timeSinceDeath: 0,
     neighbors: 1,
     radius: Math.random() * 1.5 + 2,
     location: [
-      touchPoint[0] + getJitterAmount() * getDirection(),
-      touchPoint[1] + getJitterAmount() * getDirection()
+      touchPoint[0] + getJitterAmount() * getRandomDirection(),
+      touchPoint[1] + getJitterAmount() * getRandomDirection()
     ],
     velocity: [
-      Math.random() / 10 * getDirection(),
+      Math.random() / 10 * getRandomDirection(),
       -getJitterAmount() / 4 
     ]
   }));
@@ -119,28 +124,32 @@ const lengthVector = ([x, y]: Vector2d) => Math.sqrt(Math.pow(x, 2) + Math.pow(y
 
 const overlap = (a: Particle, b: Particle) =>
   lengthVector(subtractVector(a.location, b.location)) <= (a.radius + b.radius);
-
-(() => {
-  let state: State = {
-    particles: [],
-    deadSnow: [],
-  };
-
-  let canvas = document.querySelector('canvas')!;
+  
+const resizeCanvas = (canvas: HTMLCanvasElement) => {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
+};
 
-  document.addEventListener('click', () => {
-    document.documentElement.requestFullscreen();
-  });
+const createState = (): State => ({
+  particles: [],
+  deadSnow: [],
+});
+
+(() => {
+  let state: State = createState();
+
+  let canvas = document.querySelector('canvas')!;
+
+  resizeCanvas(canvas);
 
   const touchHandler = (evt: TouchEvent) => {
+    evt.preventDefault();
 
     const touchArray = Array.from(evt.touches).map<Vector2d>(touch => [touch.clientX, touch.clientY]);
 
     const allNewParticles = 
       touchArray.reduce(
-        (all, t) => [...all, ...createParticles(t)],
+        (all, t) => [...all, ...createParticles(t, 5)],
         []);
 
     state.particles = [
@@ -148,6 +157,21 @@ const overlap = (a: Particle, b: Particle) =>
       ...state.particles
     ];
   };
+
+  const mouseHandler = (evt: MouseEvent) => {
+    state.particles = [
+      ...state.particles,
+      ...createParticles([evt.clientX, evt.clientY], 6)
+    ]
+  };
+
+  window.addEventListener('resize', () => {
+    resizeCanvas(canvas);
+    state = createState();
+  })
+
+  canvas.addEventListener('mousemove', mouseHandler);
+  canvas.addEventListener('click', mouseHandler);
 
   canvas.addEventListener('touchmove', touchHandler);
   canvas.addEventListener('touchstart', touchHandler);
